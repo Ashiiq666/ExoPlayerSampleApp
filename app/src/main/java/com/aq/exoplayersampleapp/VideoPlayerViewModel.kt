@@ -16,7 +16,11 @@ data class VideoPlayerUiState(
     val isFullscreen: Boolean = false,
     val showControls: Boolean = true,
     val isDragging: Boolean = false,
-    val seekPosition: Long = 0L
+    val seekPosition: Long = 0L,
+    val volume: Int = 100,
+    val isMuted: Boolean = false,
+    val isShuffleEnabled: Boolean = false,
+    val repeatMode: Int = 0 // 0: Off, 1: One, 2: All
 )
 
 class VideoPlayerViewModel : ViewModel() {
@@ -76,5 +80,22 @@ class VideoPlayerViewModel : ViewModel() {
 
     fun setSeekPosition(position: Long) {
         _uiState.value = _uiState.value.copy(seekPosition = position)
+    }
+
+    fun setVolume(volume: Int) {
+        _uiState.value = _uiState.value.copy(volume = volume.coerceIn(0, 100))
+    }
+
+    fun toggleMute() {
+        _uiState.value = _uiState.value.copy(isMuted = !_uiState.value.isMuted)
+    }
+
+    fun toggleShuffle() {
+        _uiState.value = _uiState.value.copy(isShuffleEnabled = !_uiState.value.isShuffleEnabled)
+    }
+
+    fun toggleRepeat() {
+        val nextMode = (_uiState.value.repeatMode + 1) % 3
+        _uiState.value = _uiState.value.copy(repeatMode = nextMode)
     }
 }

@@ -31,7 +31,9 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:screenOrientation="fullSensor"
             android:theme="@style/Theme.VideoPlayer.Fullscreen"
-            android:exported="false" />
+            android:exported="false"
+            android:supportsPictureInPicture="true"
+            android:launchMode="singleTask" />
     </application>
 
 </manifest>

@@ -1,9 +1,15 @@
 package com.aq.exoplayersampleapp
 
+import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -19,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -66,6 +73,7 @@ class VideoPlayerActivity : ComponentActivity() {
                     videoItem = videoItem,
                     playerManager = playerManager!!,
                     exoPlayer = exoPlayer!!,
+                    activity = this@VideoPlayerActivity,
                     onPlayerViewCreated = { view -> playerView = view },
                     onBackClick = { finish() },
                     onFullscreenToggle = { isFullscreen ->
@@ -128,10 +136,13 @@ fun VideoPlayerScreen(
     videoItem: VideoItem,
     playerManager: ExoPlayerManager,
     exoPlayer: ExoPlayer,
+    activity: ComponentActivity,
     onPlayerViewCreated: (PlayerView) -> Unit,
     onBackClick: () -> Unit,
     onFullscreenToggle: (Boolean) -> Unit
 ) {
+    // Get video title from videoItem
+    val videoTitle = videoItem.displayName
     val viewModel: VideoPlayerViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -242,6 +253,8 @@ fun VideoPlayerScreen(
                 viewModel = viewModel,
                 playerManager = playerManager,
                 exoPlayer = exoPlayer,
+                videoTitle = videoTitle,
+                activity = activity,
                 onBackClick = onBackClick,
                 onFullscreenToggle = onFullscreenToggle,
                 modifier = Modifier.fillMaxSize()
@@ -256,22 +269,32 @@ fun VideoPlayerControls(
     viewModel: VideoPlayerViewModel,
     playerManager: ExoPlayerManager,
     exoPlayer: ExoPlayer,
+    videoTitle: String,
+    activity: ComponentActivity,
     onBackClick: () -> Unit,
     onFullscreenToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     var showSpeedDialog by remember { mutableStateOf(false) }
+    var showVolumeDialog by remember { mutableStateOf(false) }
+    var showCastDialog by remember { mutableStateOf(false) }
+    
+    // AudioManager for volume control
+    val audioManager = remember {
+        context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager
+    }
 
     Box(
         modifier = modifier
-            .background(Color.Black.copy(alpha = 0.5f))
+            .background(Color.Black.copy(alpha = 0.7f))
     ) {
-        // Top bar with back button and title
+        // Top bar with back button, title, cast, and profile
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -283,49 +306,90 @@ fun VideoPlayerControls(
                 )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            // Title in center
+            Text(
+                text = videoTitle,
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
 
-            IconButton(
-                onClick = {
-                    viewModel.toggleFullscreen()
-                    onFullscreenToggle(uiState.isFullscreen)
+            // Cast and Profile icons
+            Row {
+                IconButton(onClick = { 
+                    showCastDialog = true
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.Cast,
+                        contentDescription = "Cast",
+                        tint = Color.White
+                    )
                 }
-            ) {
-                Icon(
-                    imageVector = if (uiState.isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                    contentDescription = "Fullscreen",
-                    tint = Color.White
-                )
+                IconButton(onClick = { 
+                    Toast.makeText(context, "Profile settings", Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.AccountCircle,
+                        contentDescription = "Profile",
+                        tint = Color.White
+                    )
+                }
             }
         }
 
-        // Center play/pause button
-        IconButton(
-            onClick = {
-                if (uiState.isPlaying) {
-                    playerManager.pause()
-                } else {
-                    playerManager.play()
-                }
-            },
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            Icon(
-                imageVector = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (uiState.isPlaying) "Pause" else "Play",
-                tint = Color.White,
-                modifier = Modifier.size(64.dp)
-            )
-        }
-
-        // Bottom controls
+        // Bottom controls - Netflix style layout
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 24.dp)
         ) {
-            // Progress bar and time
+            // Upper controls row: Picture-in-picture, Speed, Speaker
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Picture-in-picture icon (left)
+                IconButton(onClick = { 
+                    enterPictureInPictureMode(activity)
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.PictureInPicture,
+                        contentDescription = "Picture in Picture",
+                        tint = Color.White
+                    )
+                }
+
+                // Speed indicator (center)
+                TextButton(
+                    onClick = { showSpeedDialog = true },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) {
+                    Text(
+                        text = "${uiState.playbackSpeed.toInt()}x",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                // Speaker icon (right) - shows mute/unmute and volume control
+                IconButton(onClick = { 
+                    showVolumeDialog = true
+                }) {
+                    Icon(
+                        imageVector = if (uiState.isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = "Volume",
+                        tint = Color.White
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Progress bar with red color (Netflix style)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -338,8 +402,8 @@ fun VideoPlayerControls(
                 Text(
                     text = formatTime(displayPosition),
                     color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.width(60.dp)
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(50.dp)
                 )
 
                 Slider(
@@ -368,8 +432,8 @@ fun VideoPlayerControls(
                         .weight(1f)
                         .padding(horizontal = 8.dp),
                     colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        thumbColor = Color(0xFFE50914), // Red thumb (Netflix red)
+                        activeTrackColor = Color(0xFFE50914), // Red progress bar
                         inactiveTrackColor = Color.White.copy(alpha = 0.3f)
                     )
                 )
@@ -377,33 +441,48 @@ fun VideoPlayerControls(
                 Text(
                     text = formatTime(uiState.duration),
                     color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.width(60.dp)
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(50.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Control buttons
+            // Lower controls row: Shuffle, Previous, Pause, Next, Loop
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Skip backward
+                // Shuffle (left)
+                IconButton(onClick = { 
+                    viewModel.toggleShuffle()
+                    Toast.makeText(context, 
+                        if (uiState.isShuffleEnabled) "Shuffle off" else "Shuffle on", 
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.Shuffle,
+                        contentDescription = "Shuffle",
+                        tint = if (uiState.isShuffleEnabled) Color(0xFFE50914) else Color.White
+                    )
+                }
+
+                // Previous/Previous track
                 IconButton(
                     onClick = {
                         playerManager.seekBackward(10_000L)
                     }
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Replay10,
-                        contentDescription = "Skip backward 10s",
+                        imageVector = Icons.Default.SkipPrevious,
+                        contentDescription = "Previous",
                         tint = Color.White
                     )
                 }
 
-                // Play/Pause
+                // Play/Pause (center)
                 IconButton(
                     onClick = {
                         if (uiState.isPlaying) {
@@ -416,31 +495,39 @@ fun VideoPlayerControls(
                     Icon(
                         imageVector = if (uiState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (uiState.isPlaying) "Pause" else "Play",
-                        tint = Color.White
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
                     )
                 }
 
-                // Skip forward
+                // Next/Next track
                 IconButton(
                     onClick = {
                         playerManager.seekForward(10_000L)
                     }
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Forward10,
-                        contentDescription = "Skip forward 10s",
+                        imageVector = Icons.Default.SkipNext,
+                        contentDescription = "Next",
                         tint = Color.White
                     )
                 }
 
-                // Speed control
-                TextButton(
-                    onClick = { showSpeedDialog = true }
-                ) {
-                    Text(
-                        text = "${uiState.playbackSpeed}x",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge
+                // Loop/Repeat (right)
+                IconButton(onClick = { 
+                    viewModel.toggleRepeat()
+                    val newRepeatMode = (uiState.repeatMode + 1) % 3
+                    val repeatText = when (newRepeatMode) {
+                        0 -> "Repeat off"
+                        1 -> "Repeat one"
+                        else -> "Repeat all"
+                    }
+                    Toast.makeText(context, repeatText, Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.Repeat,
+                        contentDescription = "Repeat",
+                        tint = if (uiState.repeatMode > 0) Color(0xFFE50914) else Color.White
                     )
                 }
             }
@@ -458,6 +545,74 @@ fun VideoPlayerControls(
             },
             onDismiss = { showSpeedDialog = false }
         )
+    }
+
+    // Volume control dialog
+    if (showVolumeDialog) {
+        VolumeControlDialog(
+            currentVolume = uiState.volume,
+            isMuted = uiState.isMuted,
+            audioManager = audioManager,
+            onVolumeChange = { volume ->
+                setDeviceVolume(audioManager, volume)
+                viewModel.setVolume(volume)
+            },
+            onMuteToggle = {
+                toggleDeviceMute(audioManager, viewModel)
+            },
+            onDismiss = { showVolumeDialog = false }
+        )
+    }
+
+    // Cast dialog
+    if (showCastDialog) {
+        CastDialog(
+            onDismiss = { showCastDialog = false },
+            onCastSelected = { deviceName ->
+                Toast.makeText(context, "Casting to $deviceName", Toast.LENGTH_SHORT).show()
+                showCastDialog = false
+            }
+        )
+    }
+}
+
+// Helper function to enter Picture-in-Picture mode
+private fun enterPictureInPictureMode(activity: ComponentActivity) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            try {
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build()
+                activity.enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                Toast.makeText(activity, "Picture-in-Picture not supported", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(activity, "Picture-in-Picture not available", Toast.LENGTH_SHORT).show()
+        }
+    } else {
+        Toast.makeText(activity, "Picture-in-Picture requires Android 8.0+", Toast.LENGTH_SHORT).show()
+    }
+}
+
+// Helper function to set device volume
+private fun setDeviceVolume(audioManager: AudioManager, volume: Int) {
+    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    val volumeLevel = (maxVolume * volume / 100).coerceIn(0, maxVolume)
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volumeLevel, 0)
+}
+
+// Helper function to toggle mute
+private fun toggleDeviceMute(audioManager: AudioManager, viewModel: VideoPlayerViewModel) {
+    viewModel.toggleMute()
+    if (viewModel.uiState.value.isMuted) {
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+    } else {
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val volume = viewModel.uiState.value.volume
+        val volumeLevel = (maxVolume * volume / 100).coerceIn(0, maxVolume)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volumeLevel, 0)
     }
 }
 
@@ -488,6 +643,111 @@ fun SpeedSelectionDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("${speed}x")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+fun VolumeControlDialog(
+    currentVolume: Int,
+    isMuted: Boolean,
+    audioManager: AudioManager,
+    onVolumeChange: (Int) -> Unit,
+    onMuteToggle: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Volume Control") },
+        text = {
+            Column(
+                modifier = Modifier.padding(vertical = 8.dp)
+            ) {
+                // Mute toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onMuteToggle() }
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = "Mute",
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(if (isMuted) "Unmute" else "Mute")
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Volume slider
+                Text("Volume: $currentVolume%")
+                Slider(
+                    value = currentVolume.toFloat(),
+                    onValueChange = { onVolumeChange(it.toInt()) },
+                    valueRange = 0f..100f,
+                    enabled = !isMuted,
+                    colors = SliderDefaults.colors(
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+fun CastDialog(
+    onDismiss: () -> Unit,
+    onCastSelected: (String) -> Unit
+) {
+    // Simulated cast devices list
+    val castDevices = listOf(
+        "Living Room TV",
+        "Bedroom Chromecast",
+        "Kitchen Display"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cast to Device") },
+        text = {
+            Column {
+                if (castDevices.isEmpty()) {
+                    Text("No devices found")
+                } else {
+                    castDevices.forEach { device ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onCastSelected(device) }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Cast,
+                                contentDescription = "Cast",
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(device)
+                        }
                     }
                 }
             }
