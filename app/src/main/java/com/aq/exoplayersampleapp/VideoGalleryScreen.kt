@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,7 +39,8 @@ import java.util.concurrent.TimeUnit
 fun VideoGalleryScreen(
     viewModel: VideoGalleryViewModel = viewModel(),
     hasPermissions: Boolean = false,
-    onVideoClick: (VideoItem) -> Unit
+    onVideoClick: (VideoItem) -> Unit,
+    onTestUrlClick: ((String) -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -50,6 +52,9 @@ fun VideoGalleryScreen(
         }
     }
 
+    var showUrlDialog by remember { mutableStateOf(false) }
+    var urlInput by remember { mutableStateOf("") }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -57,8 +62,32 @@ fun VideoGalleryScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                ),
+                actions = {
+                    if (onTestUrlClick != null) {
+                        IconButton(onClick = { showUrlDialog = true }) {
+                            Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Default.Link,
+                                contentDescription = "Test URL",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
             )
+        },
+        floatingActionButton = {
+            if (onTestUrlClick != null) {
+                FloatingActionButton(
+                    onClick = { showUrlDialog = true },
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.PlayArrow,
+                        contentDescription = "Test URL"
+                    )
+                }
+            }
         }
     ) { paddingValues ->
         Box(
@@ -121,6 +150,65 @@ fun VideoGalleryScreen(
                     }
                 }
             }
+        }
+        
+        // Test URL Dialog
+        if (showUrlDialog && onTestUrlClick != null) {
+            AlertDialog(
+                onDismissRequest = { showUrlDialog = false },
+                title = { Text("Test Video URL") },
+                text = {
+                    Column {
+                        Text(
+                            text = "Enter a video URL to test adaptive streaming:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        OutlinedTextField(
+                            value = urlInput,
+                            onValueChange = { urlInput = it },
+                            label = { Text("Video URL") },
+                            placeholder = { Text("https://example.com/video.mpd") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Examples:\n• DASH: .mpd files\n• HLS: .m3u8 files\n• MP4: Direct video files",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Quick test: https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable {
+                                urlInput = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                            }
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (urlInput.isNotBlank()) {
+                                onTestUrlClick(urlInput.trim())
+                                showUrlDialog = false
+                                urlInput = ""
+                            }
+                        },
+                        enabled = urlInput.isNotBlank()
+                    ) {
+                        Text("Play")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showUrlDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }

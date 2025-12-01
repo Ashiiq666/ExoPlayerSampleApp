@@ -1,15 +1,21 @@
 package com.aq.exoplayersampleapp
 
 import android.app.PictureInPictureParams
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.media3.common.VideoSize
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -18,6 +24,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +48,7 @@ class VideoPlayerActivity : ComponentActivity() {
     private var playerManager: ExoPlayerManager? = null
     private var playerView: PlayerView? = null
     private var exoPlayer: ExoPlayer? = null
+    private var networkReceiver: BroadcastReceiver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,7 +73,14 @@ class VideoPlayerActivity : ComponentActivity() {
             windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         )
         exoPlayer = playerManager!!.initializePlayer()
+        
+        // Check for low memory device and adjust quality
+        playerManager!!.adjustQualityForLowMemory()
+        
         playerManager!!.loadVideo(videoItem.uri)
+        
+        // Register network change receiver for adaptive quality adjustment
+        registerNetworkReceiver()
 
         setContent {
             ExoPlayerSampleAppTheme {
@@ -112,6 +127,14 @@ class VideoPlayerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        networkReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {
+                // Receiver might not be registered
+            }
+        }
+        networkReceiver = null
         playerManager?.release()
         playerManager = null
         exoPlayer = null
@@ -128,6 +151,18 @@ class VideoPlayerActivity : ComponentActivity() {
 
     private fun showSystemUI() {
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+    }
+    
+    private fun registerNetworkReceiver() {
+        networkReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                // Update quality when network changes
+                playerManager?.updateNetworkQuality()
+            }
+        }
+        
+        val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
+        registerReceiver(networkReceiver, filter)
     }
 }
 
@@ -148,6 +183,12 @@ fun VideoPlayerScreen(
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(exoPlayer) {
+        // Setup quality change listener
+        playerManager.setQualityChangeListener { videoSize ->
+            val quality = formatVideoQuality(videoSize.width, videoSize.height)
+            viewModel.updateVideoQuality(quality)
+        }
+        
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 viewModel.updatePlaying(isPlaying)
@@ -159,6 +200,12 @@ fun VideoPlayerScreen(
                     Player.STATE_READY -> {
                         viewModel.updateLoading(false)
                         viewModel.updatePosition(exoPlayer.currentPosition, exoPlayer.duration)
+                        // Update initial quality
+                        val videoSize = exoPlayer.videoSize
+                        if (videoSize.width > 0 && videoSize.height > 0) {
+                            val quality = formatVideoQuality(videoSize.width, videoSize.height)
+                            viewModel.updateVideoQuality(quality)
+                        }
                     }
                     Player.STATE_ENDED -> {
                         viewModel.updatePlaying(false)
@@ -169,7 +216,35 @@ fun VideoPlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                viewModel.updateError(error.message ?: "Playback error")
+                val errorMessage = when {
+                    error.cause is androidx.media3.datasource.HttpDataSource.HttpDataSourceException -> {
+                        val httpError = error.cause as? androidx.media3.datasource.HttpDataSource.HttpDataSourceException
+                        val responseCode = try {
+                            (httpError as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+                        } catch (e: Exception) {
+                            null
+                        }
+                        when (responseCode) {
+                            404 -> "Video not found (404). Please check the URL."
+                            403 -> "Access denied (403). The video may be restricted."
+                            401 -> "Unauthorized (401). Authentication required."
+                            else -> "Network error: ${responseCode ?: "Unknown"}"
+                        }
+                    }
+                    error.cause is java.net.UnknownHostException -> {
+                        "Cannot connect to server. Check your internet connection."
+                    }
+                    error.cause is java.net.SocketTimeoutException -> {
+                        "Connection timeout. The server took too long to respond."
+                    }
+                    error.message?.contains("404") == true -> {
+                        "Video not found (404). The URL may be incorrect or the video was removed."
+                    }
+                    else -> {
+                        "Playback error: ${error.message ?: "Unknown error"}"
+                    }
+                }
+                viewModel.updateError(errorMessage)
                 viewModel.updateLoading(false)
             }
         }
@@ -231,11 +306,33 @@ fun VideoPlayerScreen(
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Icon(
+                    imageVector = Icons.Default.Error,
+                    contentDescription = "Error",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = error,
                     color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyLarge
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        viewModel.updateError(null)
+                        // Retry loading the video
+                        playerManager.loadVideo(videoItem.uri)
+                    }
+                ) {
+                    Text("Retry")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(onClick = { onBackClick() }) {
+                    Text("Go Back")
+                }
             }
         }
 
@@ -363,16 +460,25 @@ fun VideoPlayerControls(
                     )
                 }
 
-                // Speed indicator (center)
+                // Speed indicator (center) - shows quality if available
                 TextButton(
                     onClick = { showSpeedDialog = true },
                     modifier = Modifier.padding(horizontal = 8.dp)
                 ) {
-                    Text(
-                        text = "${uiState.playbackSpeed.toInt()}x",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "${uiState.playbackSpeed.toInt()}x",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (uiState.currentVideoQuality.isNotEmpty()) {
+                            Text(
+                                text = uiState.currentVideoQuality,
+                                color = Color.White.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
                 }
 
                 // Speaker icon (right) - shows mute/unmute and volume control
@@ -769,6 +875,16 @@ fun formatTime(milliseconds: Long): String {
     return when {
         hours > 0 -> String.format("%d:%02d:%02d", hours, minutes, seconds)
         else -> String.format("%d:%02d", minutes, seconds)
+    }
+}
+
+fun formatVideoQuality(width: Int, height: Int): String {
+    return when {
+        width >= 1920 || height >= 1080 -> "1080p"
+        width >= 1280 || height >= 720 -> "720p"
+        width >= 854 || height >= 480 -> "480p"
+        width >= 640 || height >= 360 -> "360p"
+        else -> "240p"
     }
 }
 

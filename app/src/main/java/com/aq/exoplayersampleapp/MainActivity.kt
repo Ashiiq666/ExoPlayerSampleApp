@@ -45,6 +45,21 @@ class MainActivity : ComponentActivity() {
                                 putExtra("video", videoItem)
                             }
                             startActivity(intent)
+                        },
+                        onTestUrlClick = { url ->
+                            // Create a test VideoItem from URL
+                            val testVideoItem = VideoItem(
+                                id = -1,
+                                uri = android.net.Uri.parse(url),
+                                displayName = "Test Stream",
+                                duration = 0,
+                                size = 0,
+                                dateAdded = System.currentTimeMillis()
+                            )
+                            val intent = Intent(this@MainActivity, VideoPlayerActivity::class.java).apply {
+                                putExtra("video", testVideoItem)
+                            }
+                            startActivity(intent)
                         }
                     )
                 }

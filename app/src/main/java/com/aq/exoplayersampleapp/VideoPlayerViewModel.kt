@@ -20,7 +20,8 @@ data class VideoPlayerUiState(
     val volume: Int = 100,
     val isMuted: Boolean = false,
     val isShuffleEnabled: Boolean = false,
-    val repeatMode: Int = 0 // 0: Off, 1: One, 2: All
+    val repeatMode: Int = 0, // 0: Off, 1: One, 2: All
+    val currentVideoQuality: String = "" // e.g., "1080p", "720p", "480p"
 )
 
 class VideoPlayerViewModel : ViewModel() {
@@ -97,5 +98,9 @@ class VideoPlayerViewModel : ViewModel() {
     fun toggleRepeat() {
         val nextMode = (_uiState.value.repeatMode + 1) % 3
         _uiState.value = _uiState.value.copy(repeatMode = nextMode)
+    }
+
+    fun updateVideoQuality(quality: String) {
+        _uiState.value = _uiState.value.copy(currentVideoQuality = quality)
     }
 }
